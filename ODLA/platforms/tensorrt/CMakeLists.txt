@@ -22,6 +22,8 @@ set(CUDA_ROOT /usr/local/cuda-${CUDA_VERSION}/targets/x86_64-linux)
 find_library(CUDART_LIB NAMES cudart PATHS ${CUDA_ROOT} PATH_SUFFIXES lib NO_DEFAULT_PATH)
 find_library(nvinfer NAMES nvinfer)
 find_library(nvinfer_plugin NAMES nvinfer_plugin)
+find_library(nvinfer_plugin_static NAMES nvinfer_plugin_static)
+
 
 if(NOT CUDART_LIB OR NOT nvinfer OR NOT nvinfer_plugin)
   message(STATUS "CUDA library not found, skip building ODLA for TensorRT")
@@ -35,7 +37,7 @@ add_subdirectory(plugins)
 add_odla_library(odla_tensorrt SHARED odla_tensorrt.cc)
 add_dependencies(odla_tensorrt ODLA_TRTPLUGIN)
 
-target_include_directories(odla_tensorrt PRIVATE ${CUDA_ROOT}/include)
+target_include_directories(odla_tensorrt PRIVATE ${CUDA_ROOT}/include ${CMAKE_BINARY_DIR}/include/halo)
 target_compile_options(odla_tensorrt PRIVATE -Wno-deprecated-declarations)
 target_link_libraries(odla_tensorrt ODLA ${nvinfer} ${CUDART_LIB} ${nvinfer_plugin})
 set_target_properties(odla_tensorrt PROPERTIES LINK_FLAGS

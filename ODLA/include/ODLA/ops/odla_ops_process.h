@@ -191,7 +191,7 @@ odla_GatherElements(odla_value input, odla_value indices, odla_int32 axis,
 
   \param indices the indices of "on value"
   \param depth the size of the new dimension
-  \param values the pair of on and off values
+  \param values the pair of off and on values
   \param axis the axis of new dimension on
   \param output_dims the optional output shape (can be undefined)
   \param value_id a unique value id (can be NULL)
@@ -403,6 +403,22 @@ odla_Transpose(odla_value input, odla_value_shape permutations,
 extern ODLA_API_EXPORT odla_value ODLA_API_CALL
 odla_Tile(odla_value input, const odla_uint32* repeat,
           odla_value_shape output_dims, const odla_value_id value_id);
+
+//! \brief Tile input multiples times dynamically
+/*!
+  Replicate a given \p input value multiples times dynamically.
+
+  \param input the input value
+  \param repeat the dimension numbers of repeated copies along input's
+  dimensions.
+  \param output_dims the optional output shape (can be undefined)
+  \param value_id a unique value id (can be NULL)
+
+  \return odla_value
+*/
+extern ODLA_API_EXPORT odla_value ODLA_API_CALL
+odla_TileDynamic(odla_value input, odla_value repeat,
+                 odla_value_shape output_dims, const odla_value_id value_id);
 
 #ifdef __cplusplus
 } // C extern

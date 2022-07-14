@@ -4,13 +4,18 @@
 #include <sys/time.h>
 #include <vodh_common.h>
 
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <vector>
+
+#include "ODLA/odla_common.h"
+#include "ODLA/odla_compute.h"
 
 #define MAX_INPUT_TENSOR 256
 #define MAX_OUTPUT_TENSOR 256
@@ -91,6 +96,8 @@ static u32 g_ctxId = 0;
 thread_local odla_computation g_comp;
 static std::vector<std::unique_ptr<_odla_computation>> g_comps;
 odla_device g_dev;
+bool is_new_cc = false;
+std::mutex is_new_cc_mu_;
 
 // read cc/bin files
 u32 readFile(std::string fname, bool isBin, char*& ret) {
@@ -201,7 +208,10 @@ odla_computation model_helper(const char* ccFile, const char* binFile) {
 
   comp->ccFile = std::string(ccFile);
   comp->wtFile = std::string(binFile);
-
+  {
+    std::lock_guard<std::mutex> lock(is_new_cc_mu_);
+    is_new_cc = true;
+  }
 #if USE_FILE_DMA
   // open and read model cc/bin files, img file and ref file
   // read cc source file
@@ -1054,6 +1064,15 @@ odla_status odla_ExecuteComputation(odla_computation comp, odla_context context,
     device->vodh_infer_opt.model.weight_size = comp->wtFileSz;
     device->vodh_infer_opt.model.weight_id = comp->Id;
     device->vodh_infer_opt.model.use_file = 1; // use file path instead of DMA
+    {
+      std::lock_guard<std::mutex> lock(is_new_cc_mu_);
+      if (is_new_cc) {
+        device->vodh_infer_opt.model.is_needupdate = 1;
+        is_new_cc = false;
+      } else {
+        device->vodh_infer_opt.model.is_needupdate = 0;
+      }
+    }
     strcpy(device->vodh_infer_opt.model.weight_file, comp->wtFile.c_str());
 
 #ifdef DEBUG
@@ -1143,6 +1162,43 @@ odla_status odla_ExecuteComputation(odla_computation comp, odla_context context,
   context->dataChg = false;
 
   return ret;
+}
+
+odla_status ODLA_API_CALL odla_LoadExecutable(odla_resource_location location,
+                                              odla_device device,
+                                              odla_executable* executable) {
+  // init vODLA device failed
+  if (location.location_type != ODLA_LOCATION_PATH) {
+    std::cout << "[vODLA] ERROR: unsupported location type.\n";
+    return ODLA_FAILURE;
+  }
+  const char* file_name = static_cast<const char*>(location.location);
+  if (file_name == NULL) {
+    std::cout << "[vODLA] ERROR: Cache file name is NULL.\n";
+    return ODLA_FAILURE;
+  }
+  if (device == NULL) {
+    std::cout << "[vODLA] ERROR: odla device is NULL.\n";
+    return ODLA_FAILURE;
+  }
+  if (device->vodh_dev_list == NULL) {
+    std::cout
+        << "[vODLA] ERROR: allocation of device failed, skip loading cache.\n";
+    return ODLA_FAILURE;
+  }
+
+  struct vodh_model_options moptions;
+  struct vodh_model_op_result mresult;
+  moptions.opcode = TYPE_LOAD;
+  strcpy(moptions.modelname, file_name);
+  vodh_ret ret = vodh_model(device->vodh_hd, &(device->vodh_dev_list[0]),
+                            &moptions, &mresult);
+  if (ret) {
+    std::cout << "[vODLA] ERROR: load model cache failed, ret=" << ret << "\n";
+    return ODLA_FAILURE;
+  }
+
+  return ODLA_SUCCESS;
 }
 
 } // extern "C"

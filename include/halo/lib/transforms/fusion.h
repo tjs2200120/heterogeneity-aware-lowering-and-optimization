@@ -28,6 +28,9 @@ struct FusionOptions {
 #define HALO_FUSION_OPTIONS
 #include "halo/lib/ir/fusion.cc.inc"
 #undef HALO_FUSION_OPTIONS
+  bool FuseLayerNorm = true;
+  bool FuseGelu = true;
+  bool FuseMHA = true;
 };
 
 class Fusion final : public BasicBlockPass {

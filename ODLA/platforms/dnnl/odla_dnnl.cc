@@ -1811,6 +1811,15 @@ odla_value odla_Gemm(odla_value lhs, odla_bool transpose_lhs, odla_value rhs,
   return v;
 }
 
+odla_value odla_Gelu(odla_value input, odla_bool use_approx,
+                     const odla_value_id id) {
+  // exact version:  0.5 * x * (1+ erf(x / sqrt(2)))
+  // approx version: 0.5 * x * (1 + tanh(sqrt(2 / M_PI) * (x + 0.044715 * x^3)))
+  return unary_eltwise_op(use_approx ? dnnl::algorithm::eltwise_gelu_tanh
+                                     : dnnl::algorithm::eltwise_gelu_erf,
+                          input, .0F, .0F, id);
+}
+
 odla_value odla_Erf(odla_value input, const odla_value_id value_id) {
   std::function<void()> op;
   const auto& input_shape = input->shape;
@@ -2268,6 +2277,8 @@ odla_value odla_Select(odla_value condition, odla_value a, odla_value b,
     switch (ty) {
       case ODLA_FLOAT32:
         return ternary<float>(dst, cond_val, t_val, f_val, n);
+      case ODLA_INT32:
+        return ternary<int32_t>(dst, cond_val, t_val, f_val, n);
       case ODLA_INT64:
         return ternary<int64_t>(dst, cond_val, t_val, f_val, n);
       default:
@@ -2280,4 +2291,16 @@ odla_value odla_Select(odla_value condition, odla_value a, odla_value b,
   odla_value v = CreateValue(ret_mem, condition->shape, value_id);
   v->elem_type = a->elem_type;
   return v;
+}
+
+odla_value odla_Mean(odla_values inputs, const odla_value_id value_id) {
+  int num = inputs.size;
+  auto rank = inputs.values[0]->shape.size;
+  auto elem_type = inputs.values[0]->elem_type;
+  auto dst = odla_Add(inputs.values[0], inputs.values[1], nullptr);
+  for (int i = 2; i < num; ++i) {
+    dst = odla_Add(dst, inputs.values[i], nullptr);
+  }
+  auto div = CreateConstantFromScalar(num, rank);
+  return odla_Div(dst, div, value_id);
 }

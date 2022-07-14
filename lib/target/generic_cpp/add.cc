@@ -54,11 +54,18 @@ void GenericCXXCodeGen::RunOnUnaryInstruction(Instruction* inst) {
 
 void GenericCXXCodeGen::RunOnBinaryInstruction(Instruction* inst) {
   static const std::unordered_map<OpCode, const char*> names{
-      {OpCode::ADD, "odla_Add"},     {OpCode::AND, "odla_And"},
-      {OpCode::DIV, "odla_Div"},     {OpCode::MAXIMUM, "odla_Max"},
-      {OpCode::MINIMUM, "odla_Min"}, {OpCode::MUL, "odla_Mul"},
-      {OpCode::SUB, "odla_Sub"},     {OpCode::POW, "odla_Pow"},
-      {OpCode::OR, "odla_Or"},       {OpCode::XOR, "odla_Xor"}};
+      {OpCode::ADD, "odla_Add"},
+      {OpCode::AND, "odla_And"},
+      {OpCode::DIV, "odla_Div"},
+      {OpCode::MAXIMUM, "odla_Max"},
+      {OpCode::MEAN, "odla_Mean"},
+      {OpCode::MINIMUM, "odla_Min"},
+      {OpCode::MUL, "odla_Mul"},
+      {OpCode::SUB, "odla_Sub"},
+      {OpCode::POW, "odla_Pow"},
+      {OpCode::OR, "odla_Or"},
+      {OpCode::XOR, "odla_Xor"},
+      {OpCode::SQUAREDDIFFERENCE, "odla_SquaredDifference"}};
   auto it = names.find(inst->GetOpCode());
   HLCHECK(it != names.end());
   const Def& lhs = inst->GetOperand(0);
@@ -105,6 +112,10 @@ void GenericCXXCodeGen::RunOnInstruction(OrInst* inst) {
 }
 
 void GenericCXXCodeGen::RunOnInstruction(XorInst* inst) {
+  RunOnBinaryInstruction(inst);
+}
+
+void GenericCXXCodeGen::RunOnInstruction(SquaredDifferenceInst* inst) {
   RunOnBinaryInstruction(inst);
 }
 
@@ -272,6 +283,21 @@ void GenericCXXCodeGen::RunOnInstruction(ShiftInst* inst) {
 
   CXXValue ret(inst->GetName(), op0.type);
   EmitODLACall(ret, "odla_Shift", op0, op1, inst->GetIsLeftShift());
+  ir_mapping_[*inst] = ret;
+}
+
+void GenericCXXCodeGen::RunOnInstruction(MeanInst* inst) {
+  CXXValue op0 = ir_mapping_[inst->GetOperand(0)];
+  CXXValue ret(inst->GetName(), op0.type);
+
+  const auto num = inst->GetNumOfOperands();
+  std::vector<CXXValue> inputs;
+  for (size_t i = 0; i < num; ++i) {
+    const Def& op = inst->GetOperand(i);
+    CXXValue op_v = ir_mapping_[op];
+    inputs.push_back(op_v);
+  }
+  EmitODLACall(ret, "odla_Mean", inputs);
   ir_mapping_[*inst] = ret;
 }
 

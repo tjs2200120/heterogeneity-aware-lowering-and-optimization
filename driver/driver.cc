@@ -103,9 +103,13 @@ static llvm::cl::opt<bool> SeparateConstants(
     "separate-constants",
     llvm::cl::desc("Generate separate file for constants"),
     llvm::cl::init(true), llvm::cl::cat(HaloOptCat));
+static llvm::cl::opt<bool> SimplifyForPreprocess(
+    "simplify-for-preprocess",
+    llvm::cl::desc("assume the input is preprocessed"), llvm::cl::init(false),
+    llvm::cl::cat(HaloOptCat), llvm::cl::ReallyHidden);
 static llvm::cl::opt<bool> DisableBroadcasting(
     "disable-broadcasting", llvm::cl::desc("disable broadcasting of constants"),
-    llvm::cl::init(false), llvm::cl::cat(HaloOptCat));
+    llvm::cl::init(true), llvm::cl::cat(HaloOptCat));
 static llvm::cl::opt<bool> DisableConvBN(
     "disable-convert-bn",
     llvm::cl::desc("disable convert Batch Normalization into mul/add"),
@@ -139,6 +143,11 @@ static llvm::cl::opt<bool> EmitCodeOnly(
 
 static llvm::cl::opt<bool> ConvertSplitToSlice(
     "convert-split-to-slice", llvm::cl::desc("convert split to slice"),
+    llvm::cl::init(true), llvm::cl::cat(HaloOptCat));
+
+static llvm::cl::opt<bool> ConvertSquaredDifference(
+    "convert-squared-diff",
+    llvm::cl::desc("convert squaredDifference to sub/mul"),
     llvm::cl::init(true), llvm::cl::cat(HaloOptCat));
 
 static llvm::cl::opt<bool> RISCVOpt(
@@ -311,6 +320,17 @@ static llvm::cl::opt<bool> ConstantDecombine(
 #undef HALO_FUSION_OPTIONS
 #define HALO_FUSION_CMD_OPTIONS_DECL
 #include "halo/lib/ir/fusion.cc.inc"
+static llvm::cl::opt<bool> FuseLayernorm("fuse-layernorm",
+                                         llvm::cl::desc("fuse layernorm"),
+                                         llvm::cl::init(true),
+                                         llvm::cl::cat(HaloOptCat));
+static llvm::cl::opt<bool> FuseGelu("fuse-gelu", llvm::cl::desc("fuse gelu"),
+                                    llvm::cl::init(true),
+                                    llvm::cl::cat(HaloOptCat));
+static llvm::cl::opt<bool> FuseMHA("fuse-mha",
+                                   llvm::cl::desc("fuse multi-head attention"),
+                                   llvm::cl::init(false),
+                                   llvm::cl::cat(HaloOptCat));
 #undef HALO_FUSION_CMD_OPTIONS_DECL
 
 static void PrintVersion(llvm::raw_ostream& os) {
@@ -388,6 +408,7 @@ int main(int argc, char** argv) {
   }
 
   CXXCodeGenOpts cg_opts;
+  cg_opts.simplify_for_preprocess = SimplifyForPreprocess;
   cg_opts.bf16_mode = OptBF16Mode;
   cg_opts.print_mem_stats = PrintMemStats;
   cg_opts.emit_value_reset = EmitValueReset;
@@ -417,6 +438,7 @@ int main(int argc, char** argv) {
   cg_opts.fuse_mul_to_conv = FuseMultoConv;
   cg_opts.remove_input_transpose = RemoveInputTranspose;
   cg_opts.remove_output_transpose = RemoveOutputTranspose;
+  cg_opts.emit_pb_file = target_name.startswith_lower("pb");
   cg_opts.format_code =
       !DisableCodeFormat && is_c_or_cxx_output && !is_binary_output;
   cg_opts.emit_header = true;
@@ -430,6 +452,7 @@ int main(int argc, char** argv) {
     cg_opts.quant_tbl = QuantTable.c_str();
   }
   cg_opts.convert_split_to_slice = ConvertSplitToSlice;
+  cg_opts.convert_squared_diff = ConvertSquaredDifference;
 
   if (!TemplateFile.empty()) {
     auto path = FindTemplateFile(ctx.GetBasePath(), TemplateFile);
@@ -457,7 +480,10 @@ int main(int argc, char** argv) {
   std::vector<std::string> input_shapes(InputsShape.begin(), InputsShape.end());
   std::vector<std::string> inputs(Inputs.begin(), Inputs.end());
   std::vector<std::string> outputs(Outputs.begin(), Outputs.end());
-  const auto& fusion_opts = GetFusionOptions();
+  auto fusion_opts = GetFusionOptions();
+  fusion_opts.FuseLayerNorm = FuseLayernorm;
+  fusion_opts.FuseGelu = FuseGelu;
+  fusion_opts.FuseMHA = FuseMHA;
 
   is_binary_output = name.endswith(".bc");
   if (EmitObj.getNumOccurrences() == 0 && name.endswith(".o")) {

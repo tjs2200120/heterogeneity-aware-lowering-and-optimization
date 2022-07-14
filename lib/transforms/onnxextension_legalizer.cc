@@ -46,35 +46,35 @@ static std::vector<Def> ConvertUnsqueeze(const ONNXExtensionInst* ext,
   if (!input_type.IsValid()) {
     return {};
   }
-  std::vector<int> axis;
+  std::set<int> axes;
   if (num_ops == 2) {
     const Constant* axes_c = DynCast<Constant>(ext->GetOperand(1));
     if (axes_c == nullptr) {
       return {};
     }
     auto n = axes_c->GetResultType().GetTotalNumOfElements();
-    axis.resize(n);
     for (int i = 0; i < n; ++i) {
-      axis[i] = axes_c->GetDataAsInt64(i);
+      axes.insert(axes_c->GetDataAsInt64(i));
     }
   } else {
     HLCHECK(ext->GetNumOfAttributes() == 1);
     const Attribute* attr = ext->GetAttributes()[0].get();
     HLCHECK(attr->GetName() == "axes");
-    axis = attr->GetValueAsIntegerList();
+    const auto& axes_attr = attr->GetValueAsIntegerList();
+    axes.insert(axes_attr.begin(), axes_attr.end());
   }
-  std::vector<int64_t> new_dims(input_type.GetDimSizes());
-  if (new_dims.empty()) {
-    // for scalar type, make its shape as [1].
-    HLCHECK(input_type.GetTotalNumOfElements() == 1);
-    new_dims.push_back(1);
-  } else {
-    for (auto& a : axis) {
-      if (a < 0) {
-        a += input_type.GetNumOfDims();
-      }
-      new_dims.insert(new_dims.begin() + a, 1);
-    }
+
+  int output_rank = static_cast<int>(input_type.GetNumOfDims() + axes.size());
+
+  for (auto d : axes) {
+    HLCHECK(d >= -output_rank && d <= output_rank - 1);
+  }
+
+  std::vector<int64_t> new_dims(output_rank);
+  for (int i = 0, j = 0; i < output_rank; ++i) {
+    new_dims[i] = (axes.count(i) != 0 || axes.count(i - output_rank) != 0)
+                      ? 1
+                      : input_type.GetNumOfElementsInDim(j++);
   }
 
   ConstantBuilder cb(ext->GetParent()->GetParent());
@@ -362,12 +362,49 @@ static std::vector<Def> ConvertSum(const ONNXExtensionInst* ext,
                                    IRBuilder* builder) {
   // Conver to a chain of adds.
   auto n = ext->GetNumOfOperands();
-  HLCHECK(n >= 2);
+  HLCHECK(n >= 1);
+  if (n == 1) {
+    return {ext->GetOperand(0)};
+  }
   auto op0 = builder->CreateAdd(ext->GetName(), ext->GetOperand(0),
                                 ext->GetOperand(1));
   for (unsigned i = 2; i < n; ++i) {
     op0 = builder->CreateAdd(ext->GetName() + std::to_string(i - 1), *op0,
                              ext->GetOperand(i));
+  }
+  return {*op0};
+}
+
+static std::vector<Def> ConvertMaximum(const ONNXExtensionInst* ext,
+                                       IRBuilder* builder) {
+  // Conver to a chain of maximum.
+  auto n = ext->GetNumOfOperands();
+  HLCHECK(n >= 1);
+  if (n == 1) {
+    return {ext->GetOperand(0)};
+  }
+  auto op0 = builder->CreateMaximum(ext->GetName(), ext->GetOperand(0),
+                                    ext->GetOperand(1));
+  for (unsigned i = 2; i < n; ++i) {
+    op0 = builder->CreateMaximum(ext->GetName() + std::to_string(i - 1), *op0,
+                                 ext->GetOperand(i));
+  }
+  return {*op0};
+}
+
+static std::vector<Def> ConvertMinimum(const ONNXExtensionInst* ext,
+                                       IRBuilder* builder) {
+  // Conver to a chain of minimum.
+  auto n = ext->GetNumOfOperands();
+  HLCHECK(n >= 1);
+  if (n == 1) {
+    return {ext->GetOperand(0)};
+  }
+  auto op0 = builder->CreateMinimum(ext->GetName(), ext->GetOperand(0),
+                                    ext->GetOperand(1));
+  for (unsigned i = 2; i < n; ++i) {
+    op0 = builder->CreateMinimum(ext->GetName() + std::to_string(i - 1), *op0,
+                                 ext->GetOperand(i));
   }
   return {*op0};
 }
@@ -450,35 +487,27 @@ static ResizeMode ParseResizeMode(const std::string& str) {
   return ResizeMode::INVALID;
 }
 
-enum {
-  ONNX_RESIZE_ARG_INPUT_IDX = 0,
-  ONNX_RESIZE_ARG_ROI_IDX = 1,
-  ONNX_RESIZE_ARG_SCALES_IDX = 2,
-  ONNX_RESIZE_ARG_SIZES_IDX = 1
-};
-
 static std::vector<Def> ConvertResize(const ONNXExtensionInst* ext,
                                       IRBuilder* builder) {
-  Def input = ext->GetOperand(ONNX_RESIZE_ARG_INPUT_IDX);
+  Def input = ext->GetOperand(0);
   if (!input.GetType().IsValid()) {
     return {};
   }
 
-  Def shape = Def::GetUndefined();
   bool explicit_shape = true;
-
-  // roi and scales specified
-  if (ext->GetNumOfOperands() > ONNX_RESIZE_ARG_SCALES_IDX) {
-    shape = ext->GetOperand(ONNX_RESIZE_ARG_SCALES_IDX);
-  } else { // sizes specified
-    shape = ext->GetOperand(ONNX_RESIZE_ARG_SIZES_IDX);
+  auto args = ext->GetNumOfOperands();
+  // Scale / Size are the last operand.
+  Def scale_size = ext->GetOperand(args - 1);
+  if (args >= 3 && IsA<Constant>(scale_size) &&
+      scale_size.GetType().GetTotalNumOfElements() == 0) {
+    scale_size = ext->GetOperand(args - 2);
   }
 
-  if (Type::IsFloatingPointType(shape.GetType().GetDataType())) {
+  if (Type::IsFloatingPointType(scale_size.GetType().GetDataType())) {
     explicit_shape = false;
   }
 
-  std::vector<Def> ir_operands{input, shape};
+  std::vector<Def> ir_operands{input, scale_size};
 
   std::string co_trs_mode("half_pixel");
   co_trs_mode =
@@ -771,14 +800,14 @@ static std::vector<Def> ConvertSlice(const ONNXExtensionInst* ext,
     }
   }
 
-  // calculate sizes: -((start - end) / step)
+  // calculate sizes:  1 + (end - start - 1) / step
   std::vector<int> sizes_data;
   std::vector<int> starts_data;
   sizes_data.reserve(axes.size());
   starts_data.reserve(axes.size());
   for (auto axis : axes) {
     starts_data.push_back(starts[axis]);
-    sizes_data.push_back(-((starts[axis] - ends[axis]) / steps[axis]));
+    sizes_data.push_back((ends[axis] - starts[axis] - 1) / steps[axis] + 1);
     HLCHECK(sizes_data.back() >= 0);
   }
   Constant* c_begins_norm = cb.CreateConstant(
@@ -812,9 +841,8 @@ static std::vector<Def> ConvertOneHot(const ONNXExtensionInst* ext,
   if (IsA<Instruction>(op2.GetDef())) {
     const Instruction* op2_inst = Downcast<const Instruction>(op2.GetDef());
     if (op2_inst->GetOpCode() == OpCode::CONCAT) {
-      OneHotInst* new_inst = builder->CreateOneHot(ext->GetName(), op0, op1,
-                                                   op2_inst->GetOperand(0),
-                                                   op2_inst->GetOperand(1));
+      OneHotInst* new_inst = builder->CreateOneHot(
+          ext->GetName(), op0, op1, op2, op2_inst->GetOperand(1));
 
       new_inst->SetAxis(axis);
       return {*new_inst};
@@ -826,6 +854,7 @@ static std::vector<Def> ConvertOneHot(const ONNXExtensionInst* ext,
 
     auto& type = op2.GetType();
     auto data_type = type.GetDataType();
+    HLCHECK(type.GetTotalNumOfElements() == 2);
 
     // split values to on-value and off-value
 
@@ -833,8 +862,6 @@ static std::vector<Def> ConvertOneHot(const ONNXExtensionInst* ext,
     size_t data_type_size = values->GetElementSizeInBytes();
     Type ty{data_type};
 
-    // Constant* off_value = cb.CreateConstant(name + "_off_value", ty,
-    //                                        static_cast<const void*>(ptr));
     Constant* on_value = cb.CreateConstant(
         name + "_on_value", ty,
         static_cast<const void*>(&ptr[data_type_size])); // NOLINT
@@ -923,6 +950,7 @@ static std::vector<Def> ConvertSplit(const ONNXExtensionInst* ext,
         sizes.push_back(dim);
       }
       sizes_v.push_back(sizes);
+      sizes.clear();
     }
   }
 
@@ -1568,6 +1596,12 @@ static std::vector<Def> ConvertONNXExtension(const ONNXExtensionInst* onnx_inst,
   builder->SetInsertAfter(onnx_inst);
 
   switch (onnx_inst->GetExtOpCode()) {
+    case ONNXExtOpCode::MAX: {
+      return ConvertMaximum(onnx_inst, builder);
+    }
+    case ONNXExtOpCode::MIN: {
+      return ConvertMinimum(onnx_inst, builder);
+    }
     case ONNXExtOpCode::CAST: {
       return ConvertCast(onnx_inst, builder);
     }

@@ -22,6 +22,7 @@
 #include <memory>
 
 #include "batchedNMSPlugin/batchedNMSPlugin.h"
+#include "oneHotPlugin/oneHotPlugin.h"
 
 extern "C" {
 void initODLAPlugin(nvinfer1::ILogger* logger, const char* libNamespace) {
@@ -30,8 +31,10 @@ void initODLAPlugin(nvinfer1::ILogger* logger, const char* libNamespace) {
 #else
   const int NUM_PLUGINS = 32;
 #endif
-  initLibNvInferPlugins(static_cast<void*>(logger), "");
+  initLibNvInferPlugins(static_cast<void*>(logger), libNamespace);
   REGISTER_TENSORRT_PLUGIN(BatchedNMSPluginV2Creator);
+  REGISTER_TENSORRT_PLUGIN(OneHotPluginCreator);
+
   int num_plugins = 0;
   auto plugin_list = getPluginRegistry()->getPluginCreatorList(&num_plugins);
   if (num_plugins < NUM_PLUGINS) {

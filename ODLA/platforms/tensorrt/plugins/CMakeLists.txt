@@ -21,11 +21,12 @@ if (DEFINED GPU_ARCHS)
   separate_arguments(GPU_ARCHS)
 else()
   list(APPEND GPU_ARCHS
-      35
       53
       61
       70
       75
+      80
+      86
     )
   message(STATUS "GPU_ARCHS is not defined. Generating CUDA code for default SMs: ${GPU_ARCHS}")
 endif()
@@ -60,6 +61,7 @@ set(PLUGIN_CU_SOURCES)
 
 set(PLUGIN_LISTS
     batchedNMSPlugin
+    oneHotPlugin
 )
 
 include_directories(${COMMON_UTILS_DIR} ${COMMON_UTILS_DIR}/kernels)# ../samples/common)
@@ -71,6 +73,10 @@ endforeach(PLUGIN_ITER)
 
 # Add common
 add_subdirectory(${COMMON_UTILS_DIR} ${CMAKE_CURRENT_BINARY_DIR}/common)
+# Remove
+list(FILTER PLUGIN_SOURCES EXCLUDE REGEX "checkMacrosPlugin.cpp")
+list(FILTER PLUGIN_SOURCES EXCLUDE REGEX "reducedMathPlugin.cpp")
+list(FILTER PLUGIN_SOURCES EXCLUDE REGEX "cudaDriverWrapper.cpp")
 
 # Set gencodes
 set_source_files_properties(${PLUGIN_CU_SOURCES} PROPERTIES COMPILE_FLAGS ${GENCODES})

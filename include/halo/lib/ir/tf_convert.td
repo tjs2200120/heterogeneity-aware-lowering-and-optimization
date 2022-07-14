@@ -49,8 +49,6 @@ def TF_Shape: OpMapping<"Shape", Shape> {
     AttributeMapping<"", "data_type", "INT32">];
 }
 
-def TF_SquaredDifference : TFExtension<"SquaredDifference">;
-
 def TF_Squeeze : TFExtension<"Squeeze"> {
   let extension_attr_ = [ ExtensionAttr<"squeeze_dims", IntegerList, "{}"> ];
 }
@@ -115,12 +113,12 @@ def TF_AvgPool : OpMapping<"AvgPool", PoolingAvg> {
 
 def TF_BiasAdd : OpMapping<"BiasAdd", Add>;
 
-def TF_BatchMatMul : OpMapping<"BatchMatMul", BatchMatMul> {
+def TF_BatchMatMul : OpMapping<"BatchMatMul", MatMul> {
   let attr_mapping_ = [AttributeMapping<"adj_x", "transpose_a", "false">,
                        AttributeMapping<"adj_y", "transpose_b", "false">];
 }
 
-def TF_BatchMatMulV2 : OpMapping<"BatchMatMulV2", BatchMatMul> {
+def TF_BatchMatMulV2 : OpMapping<"BatchMatMulV2", MatMul> {
   let attr_mapping_ = [AttributeMapping<"adj_x", "transpose_a", "false">,
                        AttributeMapping<"adj_y", "transpose_b", "false">];
 }
@@ -194,7 +192,9 @@ def TF_GreaterEqual : OpMapping<"GreaterEqual", Cmp> {
   let attr_mapping_ = [AttributeMapping<"", "predicator", "GE">];
 }
 
-def TF_IpuGelu : TFExtension<"IpuGelu">;
+def TF_IpuGelu : OpMapping<"IpuGelu", Gelu> {
+  let attr_mapping_ = [AttributeMapping<"", "use_approx", "false">];
+}
 
 def TF_LeakyRelu : OpMapping<"LeakyRelu", LeakyRelu> {
   let attr_mapping_ = [AttributeMapping<"alpha", "alpha", "1.0">];
@@ -357,6 +357,8 @@ def TF_TopK  : OpMapping<"TopKV2", TopK>;
 def TF_Range : OpMapping<"Range", Range>;
 
 def TF_Sigmoid : OpMapping<"Sigmoid", Sigmoid>;
+
+def TF_SquaredDifference : OpMapping<"SquaredDifference", SquaredDifference>;
 
 def TF_Switch : TFExtension<"Switch"> { let num_outputs_ = 2; }
 

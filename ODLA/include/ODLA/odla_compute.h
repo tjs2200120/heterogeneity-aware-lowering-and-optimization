@@ -58,8 +58,11 @@ typedef enum {
   ODLA_USE_DLA_CORE,
   ODLA_QUANT_TABLE,
   ODLA_QUANT_TABLE_SIZE,
+  ODLA_AGGREGATE_OPS,
   ODLA_ENABLE_ENGINE_CACHE,
   ODLA_CACHE_DIR,
+  ODLA_ASYNC_CALLBACK_FUNC,
+  ODLA_ASYNC_CALLBACK_ARG,
 } odla_item_type;
 
 //! \brief BF16 mode
@@ -69,6 +72,25 @@ typedef enum {
   BF16_PERFORMACE_MODE,
   BF16_AUTO_MODE,
 } odla_bf16_mode;
+
+//! \brief Type of resource location
+typedef enum {
+  ODLA_LOCATION_PATH,   // string of file path
+  ODLA_LOCATION_MEMORY, // memory address of a buffer
+  ODLA_LOCATION_URI,    // string of URI
+} odla_resource_location_type;
+
+//! \brief Resource location
+/*! For location_type of ODLA_PATH or ODLA_URI, `location` points to a
+ * null-terminated string and `size` is optional. For location_type of
+ * ODLA_MEMORY, `location` points to the memory address and `size` represents
+ * the length of the memory chunk.
+ */
+typedef struct {
+  odla_resource_location_type location_type;
+  const void* location;
+  odla_size_t size;
+} odla_resource_location;
 
 //! \brief Computation object
 typedef struct _odla_computation* odla_computation;
@@ -101,28 +123,28 @@ odla_CreateComputation(odla_computation* computation);
 
   \return odla_status
 */
-extern ODLA_API_EXPORT odla_status ODLA_API_CALL odla_CompileComputation(
-    const odla_computation computation, odla_executable* executable);
+extern ODLA_API_EXPORT odla_status ODLA_API_CALL
+odla_CompileComputation(const odla_computation computation,
+                        const odla_device device, odla_executable* executable);
 
 //! \brief Load a computation from the file system
 /*!
-  \param file_name the file name
+  \param location the location of the computation file
   \param computation the pointer to the loaded computation object
 
   \return odla_status
 */
-extern ODLA_API_EXPORT odla_status ODLA_API_CALL
-odla_LoadComputation(const odla_char* file_name, odla_computation* computation);
-
+extern ODLA_API_EXPORT odla_status ODLA_API_CALL odla_LoadComputation(
+    odla_resource_location location, odla_computation* computation);
 //! \brief Store a computation object into the file system
 /*!
-  \param file_name the file name
+  \param location the location of the computation file
   \param computation the computation object
 
   \return odla_status
 */
-extern ODLA_API_EXPORT odla_status ODLA_API_CALL
-odla_StoreComputation(const odla_char* file_name, odla_computation computation);
+extern ODLA_API_EXPORT odla_status ODLA_API_CALL odla_StoreComputation(
+    odla_resource_location location, odla_computation computation);
 
 //! \brief Differentiate a computation
 /*!
@@ -298,17 +320,6 @@ extern ODLA_API_EXPORT odla_status ODLA_API_CALL odla_StoreConstantsArray(
 extern ODLA_API_EXPORT odla_status ODLA_API_CALL
 odla_DestroyConstantsArray(odla_constants_array constants_array);
 
-//! \brief Create an executable object
-/*!
-  \param executable the pointer to the created executable object
-  \param context the pointer to the loaded context object
-  \param computation the pointer to the loaded computation object
-  \return odla_status
-*/
-extern ODLA_API_EXPORT odla_status ODLA_API_CALL
-odla_CreateExecutable(odla_executable* executable, odla_context context,
-                      odla_computation computation);
-
 //! \brief Load an executable from the file system
 /*!
   \param file_name the file name
@@ -318,34 +329,29 @@ odla_CreateExecutable(odla_executable* executable, odla_context context,
   \param computation the pointer to the loaded computation object
   \return odla_status
 */
-extern ODLA_API_EXPORT odla_status ODLA_API_CALL odla_LoadExecutable(
-    const odla_char* file_name, odla_device device, odla_executable* executable,
-    odla_context* context, odla_computation* computation);
+extern ODLA_API_EXPORT odla_status ODLA_API_CALL
+odla_LoadExecutable(odla_resource_location location, odla_device device,
+                    odla_executable* executable);
 
 //! \brief Store an executable object into the file system
 /*!
-  \param file_name the file name
+  \param location the location of the executable
   \param executable the executable object
 
   \return odla_status
 */
 extern ODLA_API_EXPORT odla_status ODLA_API_CALL
-odla_StoreExecutable(const odla_char* file_name, odla_executable executable);
+odla_StoreExecutable(odla_resource_location, odla_executable executable);
 
 //! \brief Launch an executable
 /*!
   \param executable the executable object
-  \param constants_array the constants array object (can be NULL)
   \param context the context object
-  \param mode the compute mode
-  \param device the device object
 
   \return odla_status
 */
-extern ODLA_API_EXPORT odla_status ODLA_API_CALL odla_LaunchExecutable(
-    const odla_executable executable,
-    const odla_constants_array constants_array, const odla_context context,
-    const odla_compute_mode mode, odla_device device);
+extern ODLA_API_EXPORT odla_status ODLA_API_CALL
+odla_LaunchExecutable(odla_executable executable, odla_context context);
 
 //! \brief Asynchronously launch an executable
 /*!

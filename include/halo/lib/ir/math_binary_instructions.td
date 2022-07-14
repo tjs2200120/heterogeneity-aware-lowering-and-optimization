@@ -32,6 +32,9 @@ let cat_ = cat_math_binary,
   def Maximum : Inst<"Compute maximum value of the inputs, element-wise,"
                      " return max(X1, X2), support broadcast.">;
 
+  def Mean : Inst<"Compute mean value of the inputs, element-wise,"
+                     " return mean(X1, X2), support broadcast.">;
+
   def Minimum : Inst<"Compute minimum value of the inputs, element-wise,"
                      " return min(X1, X2), support broadcast.">;
 
@@ -40,6 +43,8 @@ let cat_ = cat_math_binary,
 
   def Pow : Inst<"Power operation, element-wise, return X1 ^ X2, support"
                  " broadcast.">;
+
+  def SquaredDifference : Inst<"Returns conj(x - y)(x - y) element-wise.">;
 
   def Sub : Inst<"Binary subtraction operation, element-wise,"
                  " return X1 - X2, support broadcast.">;

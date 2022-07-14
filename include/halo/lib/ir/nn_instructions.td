@@ -100,6 +100,18 @@ let cat_ = cat_nn in {
     let outs_ = [Arg<"The result.", MatchArgType<0> >];
   }
 
+  def LayerNorm : Inst<"Layer Normalization."> {
+    let attrs_ = [Attr<"Axis along which to normalize.",
+                   IntegerList, "axis", "{-1}">,
+                  Attr<"Use to avoid division by zero.",
+                       Float, "epsilon", "1e-12">];
+    let ins_ = [Arg<"The input tensor, shape is usually (batch, sentence_length, embedding_dim).",
+                    ArgType<[F16,F32]> >,
+                Arg<"The scale Tensor(gamma)", ArgType<[F16, F32]>>,
+                Arg<"The offset Tensor(beta)", ArgType<[F16, F32]>>];
+    let outs_ = [Arg<"The result.", MatchArgType<0> >];
+  }
+
   def TFIDFVectorize : Inst<"TF-IDF Text Vectorization."> {
     let attrs_ = [
       Attr<"Mininum n-gram length.", Integer, "min_gram_length", "1">,
@@ -118,5 +130,24 @@ let cat_ = cat_nn in {
     ];
     let outs_ = [Arg<"The result.", ArgType<[Float]>>];
   }
-}
 
+  def MultiHeadAttention : Inst<"Multi-Head Attention."> {
+    let attrs_ = [
+      Attr<"Number of heads.", Integer, "num_heads", "0">,
+      Attr<"Hidden size of each head.", Integer, "head_size", "0">,
+      Attr<"Value for unused position.", Float, "filler", "-10000.0">,
+      Attr<"Use layer norm.", Bool, "use_layer_norm", "true">,
+    ];
+    let ins_ = [
+      Arg<"The input embedding", ArgType<[ Integer, Integer64, Float ]>>,
+      Arg<"Q weight (transposed)", MatchArgType<0>>,
+      Arg<"Q bias", MatchArgType<0>>,
+      Arg<"K weight (transposed)", MatchArgType<0>>,
+      Arg<"K bias", MatchArgType<0>>,
+      Arg<"V weight (transposed)", MatchArgType<0>>,
+      Arg<"V bias", MatchArgType<0>>,
+      OptionalArg<"mask", ArgType<[ Integer, Integer64]>>,
+    ];
+    let outs_ = [Arg<"The result.", MatchArgType<0> >];
+  }
+}

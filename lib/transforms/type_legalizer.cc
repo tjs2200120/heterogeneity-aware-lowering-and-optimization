@@ -183,6 +183,7 @@ static void RunOnInstruction(Instruction* inst) {
     case OpCode::SUB:
     case OpCode::SHIFTL:
     case OpCode::SHIFTR:
+    case OpCode::SQUAREDDIFFERENCE:
     case OpCode::AND:
     case OpCode::OR:
     case OpCode::XOR:
@@ -278,9 +279,21 @@ static void RunOnInstruction(ReshapeInst* inst) {
       op1_type.IsValid()) {
     int rank = op1_type.GetTotalNumOfElements();
     std::vector<int64_t> new_shape(rank);
+    int neg_dim_cnt = 0;
     for (int i = 0; i < rank; ++i) {
       const auto& r = GetAvailIntegerResult(op1, i);
       new_shape[i] = r.second;
+      if (r.second == -1) {
+        neg_dim_cnt += 1;
+      }
+    }
+    if ((neg_dim_cnt == 2) && (rank == 2) &&
+        (op0_type.GetNumOfElementsInDim(0) == -1)) {
+      auto new_shape_dim1 = std::accumulate(op0_type.GetDimSizes().begin() + 1,
+                                            op0_type.GetDimSizes().end(), 1,
+                                            std::multiplies<int64_t>());
+      HLCHECK((new_shape_dim1 > 0) && "Invalid reshape");
+      new_shape[1] = new_shape_dim1;
     }
     inst->GetResultsTypes()[0] = halo::Type{op0_type.GetDataType(), new_shape};
     return;
@@ -1014,8 +1027,34 @@ static void RunOnInstruction(SliceInst* inst) {
   }
   inst->GetResultsTypes()[0] =
       halo::Type{op0.GetType().GetDataType(), ret_shape};
-  HLCHECK(inst->GetResultType().IsValid() &&
-          inst->GetResultType().GetTotalNumOfElements() > 0);
+  // Some exported ONNX model might have empty result (consumers like concat
+  // will ignore it)
+  if (inst->GetResultType().GetTotalNumOfElements() == 0) {
+    LOG(WARNING) << inst->GetName() << " has no elements";
+  }
+  HLCHECK(inst->GetResultType().IsValid());
+}
+
+static void RunOnInstruction(SliceDynamicInst* inst) {
+  auto const& input_type = inst->GetOperand(0).GetType();
+  auto const& slice_size = inst->GetOperand(2);
+
+  auto dims = input_type.GetNumOfDims();
+  if (!input_type.IsStaticShape() && !IsA<Constant>(slice_size)) {
+    auto ret_shape = input_type.GetDimSizes();
+    for (unsigned i = 0; i < dims; ++i) {
+      if (ret_shape[i] == kDynamicBatchSize ||
+          ret_shape[i] == kDynamicShapeSize) {
+        continue;
+      }
+      const auto& c = GetAvailIntegerResult(slice_size, i);
+      ret_shape[i] = c.second;
+    }
+
+    inst->GetResultsTypes()[0] =
+        halo::Type{input_type.GetDataType(), ret_shape};
+    return;
+  }
 }
 
 static void RunOnInstruction(SplitInst* inst) {
@@ -1312,19 +1351,29 @@ static void RunOnInstruction(EinsumInst* inst) {
 }
 
 static void RunOnInstruction(ExpandDimsInst* inst) {
-  const auto& idx_op = inst->GetOperand(1);
-  const auto& idx_type = idx_op.GetType();
+  const auto& shape = DynCast<Constant>(inst->GetOperand(1));
   const auto& input_type = inst->GetOperand(0).GetType();
-  if (!IsA<Constant>(idx_op)) {
+  if (shape == nullptr) {
     return;
   }
-  std::vector<int64_t> shape;
-  shape.reserve(idx_type.GetTotalNumOfElements());
-  Constant* c = DynCast<Constant>(idx_op);
-  for (int i = 0, e = idx_type.GetTotalNumOfElements(); i < e; ++i) {
-    shape.push_back(c->GetDataAsInt64(i));
+  std::vector<int64_t> output_shape;
+
+  int shape_rank = shape->GetResultType().GetTotalNumOfElements();
+  int input_rank = input_type.GetNumOfDims();
+  for (int i = 0, e = std::max(shape_rank, input_rank); i < e; ++i) {
+    int input_idx = input_rank - 1 - i;
+    int shape_idx = shape_rank - 1 - i;
+    int64_t dim0 =
+        (input_idx < 0) ? 1 : input_type.GetNumOfElementsInDim(input_idx);
+    int64_t dim1 = (shape_idx < 0) ? 1 : shape->GetDataAsInt64(shape_idx);
+    HLCHECK(dim0 == dim1 || dim0 == 1 || dim1 == 1);
+    output_shape.push_back((dim0 == 1) ? dim1 : dim0);
   }
-  inst->GetResultsTypes()[0] = Type{input_type.GetDataType(), shape};
+  std::reverse(output_shape.begin(), output_shape.end());
+
+  halo::Type ret_type{input_type.GetDataType(), output_shape};
+
+  inst->GetResultsTypes()[0] = Type{input_type.GetDataType(), output_shape};
 }
 
 static void RunOnInstruction(NonMaxSuppressionInst* inst) {
@@ -1408,6 +1457,35 @@ static void RunOnInstruction(TileInst* inst) {
 
   halo::Type new_type{op0_type.GetDataType(), new_shape};
   inst->GetResultsTypes()[0] = new_type;
+}
+
+static void RunOnInstruction(TileDynamicInst* inst) {
+  auto const& op0 = inst->GetOperand(0);
+  auto& op0_type = op0.GetType();
+
+  if (!op0_type.IsValid() && !op0_type.IsStaticShape()) {
+    return;
+  }
+
+  auto const& repeats = inst->GetOperand(1);
+  auto& repeats_type = repeats.GetType();
+
+  if (!IsA<Constant>(repeats) && repeats_type.IsValid()) { // shape is dynamic
+    auto ret_shape = op0_type.GetDimSizes();
+    auto rank = op0_type.GetNumOfDims();
+    for (size_t i = 0; i < rank; ++i) {
+      const auto& c = GetAvailIntegerResult(repeats, i);
+      auto repeats_i = c.second;
+      if (repeats_i == -1) {
+        ret_shape[i] = -1;
+        continue;
+      }
+      int64_t dim_i = op0_type.GetNumOfElementsInDim(i) * repeats_i;
+      ret_shape[i] = dim_i;
+    }
+    halo::Type ret_type{op0_type.GetDataType(), ret_shape};
+    inst->GetResultsTypes()[0] = ret_type;
+  }
 }
 
 static void RunOnInstruction(HgEngineInst* inst) {
